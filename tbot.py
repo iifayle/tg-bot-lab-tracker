@@ -1,8 +1,3 @@
-"""
-Telegram-бот. Лабораторная работа №8, Задание 3
-Трекер лабораторных работ
-"""
-
 import json
 import os
 import logging
@@ -17,8 +12,8 @@ from telegram.ext import (
     ContextTypes
 )
 
-# НАСТРОЙКИ 
-BOT_TOKEN = ""
+import os
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
 
 DATA_FILE = "subjects_data.json"
 
@@ -29,18 +24,37 @@ logging.basicConfig(
 
 # РАБОТА С ФАЙЛОМ JSON 
 
+import urllib.request
+
+UPSTASH_URL = os.environ.get("UPSTASH_REDIS_REST_URL", "").rstrip("/")
+UPSTASH_TOKEN = os.environ.get("UPSTASH_REDIS_REST_TOKEN", "")
+
+def _redis_command(*args):
+    if not UPSTASH_URL or not UPSTASH_TOKEN:
+        return None
+    req = urllib.request.Request(
+        UPSTASH_URL,
+        data=json.dumps([str(a) for a in args]).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {UPSTASH_TOKEN}",
+            "Content-Type": "application/json",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=10) as r:
+        return (json.loads(r.read() or b"{}") or {}).get("result")
+
 def load_data():
-    if not os.path.exists(DATA_FILE):
-        return {}
-    if os.path.getsize(DATA_FILE) == 0:
-        return {}
     try:
-        with open(DATA_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except json.JSONDecodeError:
+        raw = _redis_command("GET", "bot:lab_tracker_data")
+        return json.loads(raw) if raw else {}
+    except Exception:
         return {}
 
 def save_data(data):
+    try:
+        _redis_command("SET", "bot:lab_tracker_data", json.dumps(data, ensure_ascii=False))
+    except Exception as e:
+        print("Ошибка сохранения в Redis:", e)
     """Сохраняет данные в файл"""
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
